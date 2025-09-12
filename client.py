@@ -3,17 +3,18 @@ import requests
 from datetime import datetime, timezone
 import time
 
-url_server = "http://127.0.0.1:5000/post-logs" #definir endpoint para recuperar datos, mi servidor
+url_server = "http://127.0.0.1:5000/logs" #definir endpoint para recuperar datos, mi servidor
 
 servicios = ["Inicio sesion", "Alta usuario", "Compra"]
 severidad = ["info", "warning", "error"]
+mensaje = ["Sesion iniciada con exito", "Fallo al realizar la compra", "Usuario creado con exito"]
 
 def crear_logs():
     log = {
     "timestamp": datetime.now(timezone.utc).isoformat(),#fecha y hora que se envio
     "service": random.choice(servicios),
     "severity": random.choice(severidad),
-    "message": "This is the log we created."
+    "message": random.choice(mensaje)
     }
     return log
 
