@@ -1,128 +1,142 @@
 from flask import Flask, request, jsonify
-from datetime import datetime, timezone
 import sqlite3
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 
-# por ahora
-logs_almacenados = []
+DB_NAME = "logs.db"
 
-#tokens por servicio
-true_tokens ={
-    "inicio_sesion": "123",
-    "pagos": "456",
-    "notificaciones": "789"
-} 
+tokentrue = "fakeToken"
 
-def validar_tokens(token):
-    return token in true_tokens.values()
-
-def validar_log_formato(keys):
-    formato_logs = {"timestamp", "service", "severity", "message"}
-    return formato_logs.issubset(keys)#verificar si todos los elementos de formato_logs están contenidos en keys
-
-def conexion_db():
-    conn = sqlite3.connect("logs.db")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def inicializar_db():
-    conn = conexion_db()
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS logs (
-        id_log INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT NOT NULL,
-        service TEXT NOT NULL,
-        severity TEXT NOT NULL,
-        message TEXT NOT NULL,
-        received_at TEXT NOT NULL
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-#enviar json a base de datos
-@app.route("/post-logs", methods=["POST"])
-def post_logs():
-    #get requets
-    log = request.get_json()
-    token = request.headers.get("Authorization")
-
-    if not validar_log_formato(log.keys()):
-        return jsonify({"status": "error", "message": "Formato invalido"}), 400
-    
-    log["received_at"] = datetime.now(timezone.utc).isoformat()
-    try:
-        conn = conexion_db()
+def init_db():
+    with sqlite3.connect(DB_NAME) as conn: #investigar
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO logs (timestamp, service, severity, message, received_at) VALUES (?, ?, ?, ?, ?)",
-            (log["timestamp"], log["service"], log["severity"], log["message"], log["received_at"])
-        )
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS logs (
+                id_log INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                service TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                message TEXT NOT NULL,
+                received_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
-        conn.close()
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"{e}"}), 400
 
-    if not validar_tokens(token):
-        return jsonify({"status": "error", "message": "quien sos broer"}), 401
-    
-    return jsonify({
-        "status": "success",
-        "message": "Log recibido",
-        "data": log
-    }), 200
+def guardar_log(data):
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO logs (timestamp, service, severity, message, received_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            data["timestamp"],
+            data["service"],
+            data["severity"],
+            data["message"],
+            datetime.now(timezone.utc).isoformat()  # formato iso 8601 now(timezone.utc)
+        ))
+        conn.commit()
+        return cursor.lastrowid# devuelve el ID de la última fila insertada para verificar que todo ok
 
-# filtrado logs por hora recibida
-@app.route("/recibidos", methods=["GET"])
-def recieved_logs():
-    conn = conexion_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM logs ORDER BY received_at DESC")
-    rows = cursor.fetchall()
-    conn.close()
+#payload: datos que se envían en el cuerpo de una petición HTTP 
+def validar_payload(data):
+    campos = ["timestamp", "service", "severity", "message"]
+    for campo in campos:
+        if campo not in data:
+            return False, f"Falta el campo: {campo}"
+        
+    try:
+        datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00"))# validar formato timestamp iso8601 y reemplaza z por 00
+    except ValueError:
+        return False, "Formato de timestamp inválido"
 
-    logs = [dict(row) for row in rows]
+    # Validar severidad
+    if data["severity"] not in ["info", "warning", "error"]:
+        return False, "Severidad inválida"
 
-    return jsonify({
-        "status": "success",
-        "logs": logs
-    }), 200
+    return True, "OK"
 
-# filtrado todos los logs
-@app.route("/all-logs", methods=["GET"])
-def get_all_logs():
-    conn = conexion_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM logs LIMIT 10")
-    rows = cursor.fetchall()
-    conn.close()
+@app.route("/logs", methods=["POST"])
+def recibir_logs():
+    data = request.get_json()# recibe el json del front
+    headers = request.headers
+    auth = headers.get("Authorization")
+    if auth != tokentrue:
+        return jsonify(({"message": "ERROR: Unauthorized"}), 401)
 
-    logs = [dict(row) for row in rows]
+    if not data:
+        return jsonify({"error": "Payload vacío"}), 400 # Bad request, servidor no pudo entender la peticion
 
-    return jsonify({
-        "status": "success",
-        "logs": logs
-    }), 200
+    logs = data if isinstance(data, list) else [data]#guarda array json u objeto json para manejarlo
 
-# filtrado todos los logs por hora recibida
+    resultados = []
+    for log in logs:
+        valido, msg = validar_payload(log)
+        if valido:
+            try:
+                log_id = guardar_log(log)
+                resultados.append({"status": "ok", "id_log": log_id})
+            except Exception as e:
+                resultados.append({"status": "error_db", "error": str(e)})
+        else:
+            resultados.append({"status": "error_validacion", "error": msg, "log": log})
+
+    return jsonify(resultados), 200
+
 @app.route("/logs", methods=["GET"])
-def get_logs():
-    conn = conexion_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT service FROM logs ORDER BY service ASC LIMIT 10")
-    rows = cursor.fetchall()
-    conn.close()
+def obtener_logs():
+    severity = request.args.get("severity")
+    service = request.args.get("service")
 
-    logs = [dict(row) for row in rows]
+    query = "SELECT * FROM logs WHERE 1=1" # para ir agregando consultas
+    params = []
 
-    return jsonify({
-        "status": "success",
-        "logs": logs
-    }), 200
+    if severity:
+        query += " AND severity = ?"
+        params.append(severity) 
 
+    if service:
+        query += " AND service = ?"
+        params.append(service)
+
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+    columnas = ["id_log", "timestamp", "service", "severity", "message", "received_at"]
+    resultados = [dict(zip(columnas, row)) for row in rows]
+
+    return jsonify(resultados), 200
+
+@app.route("/logs/severity/<valor>", methods=["GET"]) #<valor> variable
+def logs_por_severidad(valor):
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM logs WHERE severity = ?", (valor,))
+        rows = cursor.fetchall()
+
+    columnas = ["id_log", "timestamp", "service", "severity", "message", "received_at"]
+    resultados = [dict(zip(columnas, row)) for row in rows]
+
+    return jsonify(resultados), 200
+
+@app.route("/logs/service/<valor>", methods=["GET"])
+def logs_por_servicio(valor):
+    print("hellooo")
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        print("funciona conexion", valor)
+        cursor.execute("SELECT * FROM logs WHERE service = ?", (valor,))
+        rows = cursor.fetchall()
+        print(rows)
+
+    columnas = ["id_log", "timestamp", "service", "severity", "message", "received_at"]
+    resultados = [dict(zip(columnas, row)) for row in rows]# recorre todas las filas y las convierte a diccionario
+
+    return jsonify(resultados), 200
 
 if __name__ == "__main__":
-    inicializar_db()
+    init_db()
     app.run(debug=True)
