@@ -5,7 +5,7 @@ import time
 
 url_server = "http://127.0.0.1:5000/logs" #definir endpoint para recuperar datos, mi servidor
 
-servicios = ["Inicio sesion", "Alta usuario", "Compra"]
+servicios = ["inicio-sesion", "alta-usuario", "comprasaaa"]
 severidad = ["info", "warning", "error"]
 mensaje = ["Sesion iniciada con exito", "Fallo al realizar la compra", "Usuario creado con exito"]
 
@@ -26,7 +26,7 @@ def enviar_logs(cantidad, delay= 1):
             r = requests.post(#envia el json de loggssss
                 url_server, 
                 json=log,#Para indicar a la API que estamos enviando explícitamente un objeto JSON a la URL especificada. 
-                headers={"Authorization": "fakeToken2.0"} #agrega un header al dicc
+                headers={"Authorization": "fakeToken"} #agrega un header al dicc
             )
             if r.status_code == 200:#si la respuesta es exitosa
                 print(f"Log enviado {r.status_code} : {r.json()}")#para almacenar los datos de la respuesta en un objeto diccionario

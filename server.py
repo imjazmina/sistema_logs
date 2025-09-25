@@ -6,8 +6,10 @@ app = Flask(__name__)
 
 DB_NAME = "logs.db"
 
+tokentrue = "fakeToken"
+
 def init_db():
-    with sqlite3.connect(DB_NAME) as conn:
+    with sqlite3.connect(DB_NAME) as conn: #investigar
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS logs (
@@ -58,6 +60,10 @@ def validar_payload(data):
 @app.route("/logs", methods=["POST"])
 def recibir_logs():
     data = request.get_json()# recibe el json del front
+    headers = request.headers
+    auth = headers.get("Authorization")
+    if auth != tokentrue:
+        return jsonify(({"message": "ERROR: Unauthorized"}), 401)
 
     if not data:
         return jsonify({"error": "Payload vacío"}), 400 # Bad request, servidor no pudo entender la peticion
@@ -86,9 +92,9 @@ def obtener_logs():
     query = "SELECT * FROM logs WHERE 1=1" # para ir agregando consultas
     params = []
 
-    if severity:# explain this
+    if severity:
         query += " AND severity = ?"
-        params.append(severity)
+        params.append(severity) 
 
     if service:
         query += " AND service = ?"
@@ -118,10 +124,13 @@ def logs_por_severidad(valor):
 
 @app.route("/logs/service/<valor>", methods=["GET"])
 def logs_por_servicio(valor):
+    print("hellooo")
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
+        print("funciona conexion", valor)
         cursor.execute("SELECT * FROM logs WHERE service = ?", (valor,))
         rows = cursor.fetchall()
+        print(rows)
 
     columnas = ["id_log", "timestamp", "service", "severity", "message", "received_at"]
     resultados = [dict(zip(columnas, row)) for row in rows]# recorre todas las filas y las convierte a diccionario
